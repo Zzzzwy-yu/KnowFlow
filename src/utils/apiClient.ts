@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { ChatResponse, ExplainResponse, ChatMessage, WordInfo } from '@/types';
+import type { ChatResponse, ExplainResponse, ChatMessage, WordInfo, KnowledgePlacement, TreeNode, GraphProposal } from '@/types';
 
 const api = axios.create({
   baseURL: '/api',
@@ -223,7 +223,7 @@ export const chatApi = {
       });
       return response.data;
     } catch {
-      return getMockChatResponse(message, context);
+      return { ...getMockChatResponse(message, context), provider: '本地 Mock', isFallback: true };
     }
   },
 
@@ -235,7 +235,7 @@ export const chatApi = {
       });
       return response.data;
     } catch {
-      return getMockExplainResponse(word);
+      return { ...getMockExplainResponse(word), provider: '本地 Mock', isFallback: true };
     }
   },
 
@@ -246,6 +246,47 @@ export const chatApi = {
     } catch {
       return [];
     }
+  },
+
+  async organizeKnowledge(
+    title: string,
+    content: string,
+    nodes: Record<string, TreeNode>,
+    preferredParentId?: string | null
+  ): Promise<KnowledgePlacement | null> {
+    try {
+      const response = await api.post('/knowledge/organize', {
+        title,
+        content,
+        preferredParentId,
+        nodes: Object.values(nodes).map(({ id, parentId, title: nodeTitle, content: nodeContent, tags }) => ({
+          id,
+          parentId,
+          title: nodeTitle,
+          content: nodeContent,
+          tags,
+        })),
+      });
+      return response.data;
+    } catch {
+      return null;
+    }
+  },
+
+  async analyzeGraph(nodes: Record<string, TreeNode>, signal?: AbortSignal): Promise<GraphProposal> {
+    const payload = { nodes: Object.values(nodes).map(({ id, parentId, title, content, tags }) => ({ id, parentId, title, content, tags })) };
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const response = await api.post('/knowledge/analyze-graph', payload, { signal, timeout: 90000 });
+        return response.data;
+      } catch (error) {
+        lastError = error;
+        if (signal?.aborted || attempt === 1) break;
+        await new Promise((resolve) => setTimeout(resolve, 600));
+      }
+    }
+    throw lastError;
   },
 };
 

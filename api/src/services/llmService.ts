@@ -1,6 +1,6 @@
 import OpenAI from 'openai';
 import axios from 'axios';
-import type { WordInfo, ExplainResponse } from '../types';
+import type { WordInfo, ExplainResponse, KnowledgePlacement, KnowledgeRelation, OrganizeKnowledgeRequest, GraphProposal, KnowledgeNodeSummary, KnowledgeEdge, DuplicateSuggestion } from '../types/index.js';
 
 type Message = { role: 'system' | 'user' | 'assistant'; content: string };
 
@@ -320,7 +320,137 @@ const parseMarkedContent = (content: string): { cleanedContent: string; words: W
   return { cleanedContent, words };
 };
 
+const relationTypes = new Set<KnowledgeRelation>(['root', 'prerequisite', 'contains', 'detail', 'example', 'comparison', 'related']);
+
+const tokenize = (value: string) => {
+  const chinese = value.match(/[\u4e00-\u9fff]{2,6}/g) || [];
+  const latin = value.toLowerCase().match(/[a-z0-9][a-z0-9+#.-]{1,}/g) || [];
+  return new Set([...chinese, ...latin]);
+};
+
+const fallbackPlacement = (request: OrganizeKnowledgeRequest): KnowledgePlacement => {
+  const candidateTokens = tokenize(`${request.title} ${request.content.slice(0, 600)}`);
+  let best: { id: string; score: number } | null = null;
+  for (const node of request.nodes) {
+    const tokens = tokenize(`${node.title} ${node.content.slice(0, 400)} ${(node.tags || []).join(' ')}`);
+    let overlap = 0;
+    candidateTokens.forEach((token) => { if (tokens.has(token)) overlap += 1; });
+    const preferredBonus = node.id === request.preferredParentId ? 1.5 : 0;
+    const score = overlap + preferredBonus;
+    if (!best || score > best.score) best = { id: node.id, score };
+  }
+
+  const parentId = best && best.score >= 1.5 ? best.id : null;
+  return {
+    parentId,
+    relationType: parentId ? 'related' : 'root',
+    reason: parentId ? '根据知识点关键词与上下文相似度自动归类' : '未发现足够明确的上位知识点，作为独立主题',
+    normalizedTitle: request.title.trim(),
+    tags: [...candidateTokens].slice(0, 5),
+    confidence: parentId ? Math.min(0.75, 0.4 + (best?.score || 0) * 0.08) : 0.4,
+  };
+};
+
+const parsePlacement = (raw: string, request: OrganizeKnowledgeRequest): KnowledgePlacement => {
+  const fallback = fallbackPlacement(request);
+  try {
+    const jsonText = raw.match(/\{[\s\S]*\}/)?.[0] || raw;
+    const parsed = JSON.parse(jsonText) as Partial<KnowledgePlacement>;
+    const validIds = new Set(request.nodes.map((node) => node.id));
+    const parentId = parsed.parentId && validIds.has(parsed.parentId) ? parsed.parentId : null;
+    const relationType = parsed.relationType && relationTypes.has(parsed.relationType)
+      ? parsed.relationType
+      : parentId ? 'related' : 'root';
+    return {
+      parentId,
+      relationType: parentId ? relationType : 'root',
+      reason: typeof parsed.reason === 'string' ? parsed.reason.slice(0, 200) : fallback.reason,
+      normalizedTitle: typeof parsed.normalizedTitle === 'string' && parsed.normalizedTitle.trim()
+        ? parsed.normalizedTitle.trim().slice(0, 80)
+        : fallback.normalizedTitle,
+      tags: Array.isArray(parsed.tags) ? parsed.tags.filter((tag): tag is string => typeof tag === 'string').slice(0, 8) : fallback.tags,
+      confidence: typeof parsed.confidence === 'number' ? Math.max(0, Math.min(1, parsed.confidence)) : fallback.confidence,
+    };
+  } catch {
+    return fallback;
+  }
+};
+
+const fallbackGraphProposal = (nodes: KnowledgeNodeSummary[]): GraphProposal => {
+  const placements = Object.fromEntries(nodes.map((node) => [node.id, fallbackPlacement({ title: node.title, content: node.content, preferredParentId: node.parentId, nodes: nodes.filter((item) => item.id !== node.id) })]));
+  const duplicates: DuplicateSuggestion[] = [];
+  for (let index = 0; index < nodes.length; index += 1) {
+    for (let other = index + 1; other < nodes.length; other += 1) {
+      const left = nodes[index].title.toLowerCase().replace(/\s+/g, '');
+      const right = nodes[other].title.toLowerCase().replace(/\s+/g, '');
+      if (left === right) duplicates.push({ nodeIds: [nodes[index].id, nodes[other].id], reason: '标题完全相同', confidence: 0.98 });
+    }
+  }
+  return { placements, edges: [], duplicates };
+};
+
+const normalizeGraphProposal = (value: unknown, nodes: KnowledgeNodeSummary[]): GraphProposal => {
+  const fallback = fallbackGraphProposal(nodes);
+  if (!value || typeof value !== 'object') return fallback;
+  const raw = value as { placements?: Record<string, Partial<KnowledgePlacement>>; edges?: Partial<KnowledgeEdge>[]; duplicates?: Partial<DuplicateSuggestion>[] };
+  const ids = new Set(nodes.map((node) => node.id));
+  const placements = Object.fromEntries(nodes.map((node) => {
+    const item = raw.placements?.[node.id];
+    const parentId = item?.parentId && ids.has(item.parentId) && item.parentId !== node.id ? item.parentId : null;
+    const relationType = item?.relationType && relationTypes.has(item.relationType) ? item.relationType : parentId ? 'related' : 'root';
+    return [node.id, { parentId, relationType: parentId ? relationType : 'root', reason: String(item?.reason || fallback.placements[node.id].reason).slice(0, 200), normalizedTitle: String(item?.normalizedTitle || node.title).slice(0, 80), tags: Array.isArray(item?.tags) ? item.tags.filter((tag): tag is string => typeof tag === 'string').slice(0, 8) : [], confidence: typeof item?.confidence === 'number' ? Math.max(0, Math.min(1, item.confidence)) : 0.5 }];
+  }));
+  const edges = (raw.edges || []).filter((edge) => edge.sourceId && edge.targetId && ids.has(edge.sourceId) && ids.has(edge.targetId) && edge.sourceId !== edge.targetId && edge.type && relationTypes.has(edge.type)).slice(0, 300).map((edge, index) => ({ id: `edge-${index}-${edge.sourceId}-${edge.targetId}`, sourceId: edge.sourceId!, targetId: edge.targetId!, type: edge.type as KnowledgeEdge['type'], reason: String(edge.reason || '语义相关').slice(0, 200), confidence: typeof edge.confidence === 'number' ? Math.max(0, Math.min(1, edge.confidence)) : 0.5 }));
+  const duplicates = (raw.duplicates || []).filter((item) => Array.isArray(item.nodeIds) && item.nodeIds.length === 2 && ids.has(item.nodeIds[0]!) && ids.has(item.nodeIds[1]!) && item.nodeIds[0] !== item.nodeIds[1]).slice(0, 50).map((item) => ({ nodeIds: item.nodeIds as [string, string], reason: String(item.reason || '语义高度相似').slice(0, 200), confidence: typeof item.confidence === 'number' ? Math.max(0, Math.min(1, item.confidence)) : 0.7 }));
+  return { placements, edges, duplicates };
+};
+
 export const llmService = {
+  async analyzeKnowledgeGraph(nodes: KnowledgeNodeSummary[]): Promise<GraphProposal> {
+    if (nodes.length < 2) return fallbackGraphProposal(nodes);
+    const provider = getProvider();
+    if (!provider) return fallbackGraphProposal(nodes);
+    const compact = nodes.slice(0, 120).map((node) => ({ ...node, content: node.content.slice(0, 500) }));
+    try {
+      const raw = await provider.chat([
+        { role: 'system', content: '你是知识图谱架构师。一次性分析全部节点，输出严格 JSON，不要 Markdown。父子关系必须无环；横向边只表达有意义的依赖、比较、实例或相关关系。' },
+        { role: 'user', content: `分析这些节点：${JSON.stringify(compact)}\n返回 {"placements":{"节点ID":{"parentId":"节点ID或null","relationType":"root|prerequisite|contains|detail|example|comparison|related","reason":"理由","normalizedTitle":"标题","tags":["标签"],"confidence":0.8}},"edges":[{"sourceId":"ID","targetId":"ID","type":"prerequisite|contains|detail|example|comparison|related","reason":"理由","confidence":0.8}],"duplicates":[{"nodeIds":["ID1","ID2"],"reason":"理由","confidence":0.9}]}。最多输出 3N 条边，只报告置信度高于 0.7 的重复项。` },
+      ]);
+      const json = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || raw);
+      return normalizeGraphProposal(json, compact);
+    } catch (error) {
+      console.error('Graph analysis error:', error);
+      return fallbackGraphProposal(nodes);
+    }
+  },
+
+  async organizeKnowledge(request: OrganizeKnowledgeRequest): Promise<KnowledgePlacement> {
+    if (request.nodes.length === 0) return fallbackPlacement(request);
+    const currentProvider = getProvider();
+    if (!currentProvider) return fallbackPlacement(request);
+
+    const nodes = request.nodes.slice(-80).map((node) => ({
+      id: node.id,
+      parentId: node.parentId,
+      title: node.title,
+      summary: node.content.slice(0, 240),
+      tags: node.tags || [],
+    }));
+    const prompt = `你是知识架构师。请把新知识点放入已有知识树中，父节点必须是更上位、前置或能自然包含它的知识点，不能仅依据提问时间。\n
+新知识点：${request.title}\n内容：${request.content.slice(0, 800)}\n用户当前节点：${request.preferredParentId || '无'}\n已有节点：${JSON.stringify(nodes)}\n
+只返回 JSON：{"parentId":"已有节点ID或null","relationType":"prerequisite|contains|detail|example|comparison|related|root","reason":"简短理由","normalizedTitle":"精炼标题","tags":["标签"],"confidence":0到1}。若没有合理上位节点，parentId 必须为 null。`;
+    try {
+      const raw = await currentProvider.chat([
+        { role: 'system', content: '你负责构建符合概念依赖、包含、比较和实例关系的知识树。只输出合法 JSON。' },
+        { role: 'user', content: prompt },
+      ]);
+      return parsePlacement(raw, request);
+    } catch (error) {
+      console.error('Knowledge organization error:', error);
+      return fallbackPlacement(request);
+    }
+  },
+
   async getChatResponse(message: string, sessionId?: string, context?: string): Promise<{ content: string; words: WordInfo[]; sessionId: string; provider: string }> {
     const currentSessionId = sessionId || generateSessionId();
     const currentProvider = getProvider();

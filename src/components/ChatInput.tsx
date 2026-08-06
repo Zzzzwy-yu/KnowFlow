@@ -33,20 +33,20 @@ export function ChatInput({ onSend, isLoading, activeNode }: ChatInputProps) {
   };
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-50 bg-white border-t border-gray-200 p-4 shadow-lg">
+    <div className="fixed bottom-0 left-0 right-0 z-50 bg-white border-t border-gray-200 p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] shadow-lg sm:p-4">
       <div className="max-w-4xl mx-auto">
         {activeNode && (
-          <div className="mb-3 flex items-center justify-between">
-            <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all duration-200 ${
+          <div className="mb-2 flex min-w-0 items-center justify-between gap-1 sm:mb-3">
+            <div className={`flex min-w-0 flex-1 items-center gap-1 px-2 py-1.5 rounded-lg text-xs transition-all duration-200 sm:gap-2 sm:px-3 sm:py-2 sm:text-sm ${
               contextMode ? 'bg-primary/10 text-primary' : 'bg-gray-100 text-gray-500'
             }`}>
-              <span className="truncate max-w-xs">
+              <span className="min-w-0 flex-1 truncate sm:max-w-xs">
                 {activeNode.type === 'question' ? '当前问题：' : '当前解释：'}
                 {activeNode.title}
               </span>
               <button
                 onClick={toggleContextMode}
-                className="flex items-center gap-1 px-2 py-1 rounded hover:bg-white/50 transition-colors"
+                className="flex shrink-0 items-center gap-1 px-1.5 py-1 rounded hover:bg-white/50 transition-colors sm:px-2"
               >
                 <ArrowRight className="w-4 h-4" />
                 {contextMode ? '在此节点下提问' : '关联提问'}
@@ -62,7 +62,7 @@ export function ChatInput({ onSend, isLoading, activeNode }: ChatInputProps) {
           </div>
         )}
         
-        <div className="relative flex gap-3">
+        <div className="relative flex gap-2 sm:gap-3">
           <div className="flex-1 relative">
             <textarea
               value={input}
@@ -70,9 +70,9 @@ export function ChatInput({ onSend, isLoading, activeNode }: ChatInputProps) {
               onKeyDown={handleKeyDown}
               placeholder={contextMode ? '在此节点下继续提问...' : '输入你想问的问题...'}
               disabled={isLoading}
-              className="w-full px-4 py-3 pr-12 border border-gray-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary resize-none transition-all duration-200 bg-gray-50 hover:bg-white text-gray-800 placeholder-gray-400"
-              rows={2}
-              style={{ minHeight: '60px', maxHeight: '180px' }}
+              className="w-full px-3 py-2 pr-11 text-sm border border-gray-300 rounded-xl sm:rounded-2xl sm:px-4 sm:py-3 sm:pr-12 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary resize-none transition-all duration-200 bg-gray-50 hover:bg-white text-gray-800 placeholder-gray-400"
+              rows={1}
+              style={{ minHeight: '48px', maxHeight: '140px' }}
             />
             <div className="absolute right-3 bottom-3 flex items-center gap-2">
               <button
@@ -92,7 +92,7 @@ export function ChatInput({ onSend, isLoading, activeNode }: ChatInputProps) {
           <button
             onClick={handleSubmit}
             disabled={!input.trim() || isLoading}
-            className="px-6 py-3 bg-primary text-white rounded-2xl font-medium hover:bg-primary/90 disabled:bg-gray-300 disabled:cursor-not-allowed transition-all duration-200 flex items-center gap-2 hover:scale-105 active:scale-95 shadow-md"
+            className="px-3 py-2 bg-primary text-white rounded-xl font-medium sm:rounded-2xl sm:px-6 sm:py-3 hover:bg-primary/90 disabled:bg-gray-300 disabled:cursor-not-allowed transition-all duration-200 flex items-center gap-2 hover:scale-105 active:scale-95 shadow-md"
           >
             {isLoading ? (
               <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />

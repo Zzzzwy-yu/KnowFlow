@@ -1,11 +1,16 @@
 import { WordButton } from './WordButton';
 import type { TreeNode, WordInfo } from '@/types';
-import { Circle, BookOpen, Lightbulb, List, Link2, ChevronRight } from 'lucide-react';
+import { Circle, BookOpen, Lightbulb, List, Link2, ChevronRight, Pencil, Trash2, Check, X } from 'lucide-react';
 import { marked, Tokens } from 'marked';
+import { useEffect, useState } from 'react';
 
 interface DetailPanelProps {
   node: TreeNode;
+  nodes: Record<string, TreeNode>;
   onWordClick: (word: string) => void;
+  onUpdate: (nodeId: string, updates: Partial<Pick<TreeNode, 'title' | 'content' | 'tags'>>) => void;
+  onDelete: (nodeId: string) => void;
+  onMove: (nodeId: string, parentId: string | null) => boolean;
 }
 
 function renderTokensWithKeywords(tokens: Tokens.Generic[], words: WordInfo[], onWordClick: (word: string) => void, textOffset: number = 0): JSX.Element[] {
@@ -105,12 +110,8 @@ function renderTokensWithKeywords(tokens: Tokens.Generic[], words: WordInfo[], o
 }
 
 function renderMarkdownWithKeywords(content: string, words: WordInfo[], onWordClick: (word: string) => void): JSX.Element[] {
-  if (!words || words.length === 0) {
-    return [<span key="md-content" dangerouslySetInnerHTML={{ __html: marked.parse(content) as string }} />];
-  }
-
   const tokens = marked.Lexer.lex(content);
-  return renderTokensWithKeywords(tokens, words, onWordClick);
+  return renderTokensWithKeywords(tokens, words || [], onWordClick);
 }
 
 function ContentCard({ content, words, onWordClick }: { content: string; words?: WordInfo[]; onWordClick: (word: string) => void }) {
@@ -143,7 +144,7 @@ function ExamplesSection({ examples }: { examples: string[] }) {
             <span className="flex-shrink-0 w-5 h-5 rounded-full bg-green-100 text-green-600 text-xs flex items-center justify-center font-medium">
               {index + 1}
             </span>
-            <p className="text-gray-600 text-sm" dangerouslySetInnerHTML={{ __html: marked.parse(example) as string }} />
+            <p className="text-gray-600 text-sm whitespace-pre-wrap">{example}</p>
           </div>
         ))}
       </div>
@@ -174,21 +175,53 @@ function RelatedTermsSection({ relatedTerms, onWordClick }: { relatedTerms: stri
   );
 }
 
-export function DetailPanel({ node, onWordClick }: DetailPanelProps) {
+export function DetailPanel({ node, nodes, onWordClick, onUpdate, onDelete, onMove }: DetailPanelProps) {
+  const [editing, setEditing] = useState(false);
+  const [title, setTitle] = useState(node.title);
+  const [content, setContent] = useState(node.content);
+  const [tags, setTags] = useState((node.tags || []).join(', '));
+  useEffect(() => {
+    setEditing(false);
+    setTitle(node.title);
+    setContent(node.content);
+    setTags((node.tags || []).join(', '));
+  }, [node.id, node.title, node.content]);
+  const save = () => {
+    if (!title.trim() || !content.trim()) return;
+    onUpdate(node.id, { title: title.trim(), content: content.trim(), tags: tags.split(/[,，]/).map((tag) => tag.trim()).filter(Boolean).slice(0, 12) });
+    setEditing(false);
+  };
   return (
     <div className="h-full flex flex-col">
-      <div className="flex items-center gap-3 px-6 py-4 border-b border-gray-100 bg-white">
+      <div className="flex items-center gap-2 px-3 py-3 border-b border-gray-100 bg-white sm:gap-3 sm:px-6 sm:py-4">
         {node.type === 'question' ? (
           <Circle className="w-6 h-6 text-primary" />
         ) : (
           <BookOpen className="w-6 h-6 text-secondary" />
         )}
-        <h2 className="text-lg font-bold text-gray-800">{node.title}</h2>
+        {editing ? <input value={title} onChange={(event) => setTitle(event.target.value)} className="min-w-0 flex-1 border rounded-lg px-2 py-1.5 text-base font-bold sm:px-3 sm:text-lg" /> : <h2 className="min-w-0 flex-1 truncate text-base font-bold text-gray-800 sm:text-lg">{node.title}</h2>}
+        <div className="flex gap-1">
+          {editing ? <><button title="保存" onClick={save} className="p-2 text-green-600 hover:bg-green-50 rounded-lg"><Check className="w-4 h-4" /></button><button title="取消" onClick={() => { setEditing(false); setTitle(node.title); setContent(node.content); }} className="p-2 text-gray-500 hover:bg-gray-100 rounded-lg"><X className="w-4 h-4" /></button></> : <button title="编辑" onClick={() => setEditing(true)} className="p-2 text-gray-500 hover:text-primary hover:bg-orange-50 rounded-lg"><Pencil className="w-4 h-4" /></button>}
+          <button title="删除节点及其子节点" onClick={() => window.confirm(`确定删除“${node.title}”及其全部子节点吗？`) && onDelete(node.id)} className="p-2 text-gray-500 hover:text-red-500 hover:bg-red-50 rounded-lg"><Trash2 className="w-4 h-4" /></button>
+        </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-6 pb-48 bg-gradient-to-br from-gray-50 to-gray-100">
+      <div className="flex-1 overflow-y-auto p-3 pb-40 bg-gradient-to-br from-gray-50 to-gray-100 sm:p-6 sm:pb-48">
         <div className="max-w-3xl mx-auto space-y-4">
-          <ContentCard content={node.content} words={node.words} onWordClick={onWordClick} />
+          <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
+            <span className="px-2 py-1 rounded-full bg-blue-50 text-blue-600">{node.relationType || 'root'}</span>
+            {node.provider && <span className={`px-2 py-1 rounded-full ${node.isFallback ? 'bg-amber-100 text-amber-700' : 'bg-green-50 text-green-700'}`}>{node.isFallback ? '离线内容' : node.provider}</span>}
+            {node.relationReason && <span>{node.relationReason}</span>}
+            {!editing && node.tags?.map((tag) => <span key={tag} className="px-2 py-1 rounded-full bg-gray-200">#{tag}</span>)}
+          </div>
+          <div className="flex flex-col gap-2 rounded-xl border border-gray-200 bg-white p-3 text-sm sm:flex-row sm:items-center">
+            <label className="text-gray-500 shrink-0">上位知识点</label>
+            <select value={node.parentId || ''} onChange={(event) => { if (!onMove(node.id, event.target.value || null)) window.alert('不能将节点移动到自身或其子节点下。'); }} className="min-w-0 flex-1 bg-transparent outline-none text-gray-700">
+              <option value="">独立根主题</option>
+              {Object.values(nodes).filter((item) => item.id !== node.id).map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
+            </select>
+          </div>
+          {editing ? <div className="space-y-3"><textarea value={content} onChange={(event) => setContent(event.target.value)} rows={12} className="w-full border rounded-xl p-4 text-sm leading-relaxed" /><input value={tags} onChange={(event) => setTags(event.target.value)} placeholder="标签，用逗号分隔" className="w-full border rounded-xl px-4 py-3 text-sm" /></div> : <ContentCard content={node.content} words={node.words} onWordClick={onWordClick} />}
 
           {node.examples && node.examples.length > 0 && (
             <ExamplesSection examples={node.examples} />

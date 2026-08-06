@@ -6,7 +6,8 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "server": "tsx api/src/server.ts"
+    "server": "tsx api/src/server.ts",
+    "test": "node --experimental-strip-types --test tests/graph.test.ts"
   },
   "dependencies": {
     "react": "^18.2.0",

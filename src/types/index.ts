@@ -20,6 +20,8 @@ export interface ChatResponse {
   definition?: string;
   examples?: string[];
   relatedTerms?: string[];
+  provider?: string;
+  isFallback?: boolean;
 }
 
 export interface ExplainRequest {
@@ -34,6 +36,8 @@ export interface ExplainResponse {
   words: WordInfo[];
   examples: string[];
   relatedTerms: string[];
+  provider?: string;
+  isFallback?: boolean;
 }
 
 export interface TreeNode {
@@ -50,10 +54,50 @@ export interface TreeNode {
   definition?: string;
   examples?: string[];
   relatedTerms?: string[];
+  relationType?: KnowledgeRelation;
+  relationReason?: string;
+  tags?: string[];
+  provider?: string;
+  isFallback?: boolean;
+}
+
+export type KnowledgeRelation = 'root' | 'prerequisite' | 'contains' | 'detail' | 'example' | 'comparison' | 'related';
+
+export interface KnowledgeEdge {
+  id: string;
+  sourceId: string;
+  targetId: string;
+  type: Exclude<KnowledgeRelation, 'root'>;
+  reason: string;
+  confidence: number;
+}
+
+export interface DuplicateSuggestion {
+  nodeIds: [string, string];
+  reason: string;
+  confidence: number;
+}
+
+export interface GraphProposal {
+  placements: Record<string, KnowledgePlacement>;
+  edges: KnowledgeEdge[];
+  duplicates: DuplicateSuggestion[];
+}
+
+export interface KnowledgePlacement {
+  parentId: string | null;
+  relationType: KnowledgeRelation;
+  reason: string;
+  normalizedTitle: string;
+  tags: string[];
+  confidence: number;
 }
 
 export interface TreeState {
   nodes: Record<string, TreeNode>;
+  edges: KnowledgeEdge[];
+  previousGraph: { nodes: Record<string, TreeNode>; edges: KnowledgeEdge[] } | null;
+  nextGraph: { nodes: Record<string, TreeNode>; edges: KnowledgeEdge[] } | null;
   rootId: string | null;
   activeNodeId: string | null;
   isLoading: boolean;
@@ -66,6 +110,14 @@ export interface TreeState {
   setLoading: (loading: boolean) => void;
   setSessionId: (sessionId: string) => void;
   clearTree: () => void;
+  updateNode: (nodeId: string, updates: Partial<Pick<TreeNode, 'title' | 'content' | 'tags'>>) => void;
+  deleteNode: (nodeId: string) => void;
+  replaceTree: (nodes: Record<string, TreeNode>, edges?: KnowledgeEdge[]) => void;
+  moveNode: (nodeId: string, parentId: string | null) => boolean;
+  applyGraphProposal: (proposal: GraphProposal) => void;
+  undoGraphChange: () => void;
+  redoGraphChange: () => void;
+  mergeNodes: (keepId: string, removeId: string) => boolean;
   getNode: (nodeId: string) => TreeNode | undefined;
   getChildren: (nodeId: string) => TreeNode[];
 }

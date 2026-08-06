@@ -1,10 +1,12 @@
 import axios from 'axios';
-import type { ChatResponse, ExplainResponse, ChatMessage, WordInfo, KnowledgePlacement, TreeNode, GraphProposal } from '@/types';
+import type { AnswerDepth, ChatResponse, ExplainResponse, ChatMessage, WordInfo, KnowledgePlacement, TreeNode, GraphProposal, MaterialImportResult } from '@/types';
 
 const api = axios.create({
   baseURL: '/api',
   timeout: 60000,
 });
+
+const responseCache = new Map<string, { expiresAt: number; value: ChatResponse }>();
 
 const parseMarkedContent = (content: string): { cleanedContent: string; words: WordInfo[] } => {
   const words: WordInfo[] = [];
@@ -214,15 +216,21 @@ function getMockExplainResponse(word: string): ExplainResponse {
 }
 
 export const chatApi = {
-  async sendMessage(message: string, sessionId?: string, context?: string): Promise<ChatResponse> {
+  async sendMessage(message: string, sessionId?: string, context?: string, depth: AnswerDepth = 'beginner', signal?: AbortSignal, bypassCache = false): Promise<ChatResponse> {
+    const cacheKey = JSON.stringify([message.trim().toLowerCase(), context || '', depth]);
+    const cached = responseCache.get(cacheKey);
+    if (!bypassCache && cached && cached.expiresAt > Date.now()) return { ...cached.value, provider: `${cached.value.provider || 'AI'} · 缓存`, durationMs: 0 };
     try {
       const response = await api.post('/chat', {
         message,
         sessionId,
         context,
-      });
+        depth,
+      }, { signal });
+      if (!response.data.isFallback) responseCache.set(cacheKey, { expiresAt: Date.now() + 10 * 60_000, value: response.data });
       return response.data;
-    } catch {
+    } catch (error) {
+      if (signal?.aborted) throw error;
       return { ...getMockChatResponse(message, context), provider: '本地 Mock', isFallback: true };
     }
   },
@@ -287,6 +295,24 @@ export const chatApi = {
       }
     }
     throw lastError;
+  },
+
+  async importMaterial(title: string, content: string, signal?: AbortSignal): Promise<MaterialImportResult> {
+    try {
+      const response = await api.post('/knowledge/import-material', { title, content }, { signal, timeout: 120000 });
+      return response.data;
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
+        throw new Error('资料导入接口不存在，当前后端可能仍是旧版本。请重启后端服务后重试。');
+      }
+      if (axios.isAxiosError(error) && error.code === 'ECONNABORTED') {
+        throw new Error('资料提取超时，请缩短资料后重试。');
+      }
+      if (axios.isAxiosError(error) && !error.response) {
+        throw new Error('无法连接后端服务，请确认后端已启动。');
+      }
+      throw error;
+    }
   },
 };
 

@@ -3,6 +3,11 @@ import { persist } from 'zustand/middleware';
 import type { TreeState, ChatState, MiniWindowState } from '@/types';
 import { normalizeParentMap, wouldCreateCycle } from '@/utils/graph';
 
+const recordHistory = (state: TreeState, label: string) => ({
+  historyPast: [...state.historyPast, { nodes: state.nodes, edges: state.edges, label, createdAt: new Date().toISOString() }].slice(-30),
+  historyFuture: [],
+});
+
 interface PersistedTreeState {
   nodes: TreeState['nodes'];
   rootId: TreeState['rootId'];
@@ -18,6 +23,8 @@ export const useTreeStore = create<TreeState>()(
       edges: [],
       previousGraph: null,
       nextGraph: null,
+      historyPast: [],
+      historyFuture: [],
       rootId: null,
       activeNodeId: null,
       isLoading: false,
@@ -25,6 +32,7 @@ export const useTreeStore = create<TreeState>()(
 
       addNode: (node) =>
         set((state) => ({
+          ...recordHistory(state, `新增“${node.title}”`),
           nodes: { ...state.nodes, [node.id]: node },
         })),
 
@@ -34,6 +42,7 @@ export const useTreeStore = create<TreeState>()(
           if (!parent) return state;
 
           return {
+            ...recordHistory(state, `新增“${node.title}”`),
             nodes: {
               ...state.nodes,
               [node.id]: node,
@@ -83,7 +92,8 @@ export const useTreeStore = create<TreeState>()(
         }),
 
       clearTree: () =>
-        set({
+        set((state) => ({
+          ...recordHistory(state, '清空知识树'),
           nodes: {},
           rootId: null,
           activeNodeId: null,
@@ -91,14 +101,17 @@ export const useTreeStore = create<TreeState>()(
           edges: [],
           previousGraph: null,
           nextGraph: null,
-        }),
+        })),
 
       updateNode: (nodeId, updates) =>
         set((state) => {
           const node = state.nodes[nodeId];
           if (!node) return state;
-          return { nodes: { ...state.nodes, [nodeId]: { ...node, ...updates } } };
+          return { ...recordHistory(state, `编辑“${node.title}”`), nodes: { ...state.nodes, [nodeId]: { ...node, ...updates } } };
         }),
+
+      updateNodeTransient: (nodeId, updates) =>
+        set((state) => state.nodes[nodeId] ? { nodes: { ...state.nodes, [nodeId]: { ...state.nodes[nodeId], ...updates } } } : state),
 
       deleteNode: (nodeId) =>
         set((state) => {
@@ -118,7 +131,7 @@ export const useTreeStore = create<TreeState>()(
           const rootId = state.rootId && ids.has(state.rootId)
             ? Object.values(nodes).find((node) => node.parentId === null)?.id ?? null
             : state.rootId;
-          return { nodes, edges: state.edges.filter((edge) => !ids.has(edge.sourceId) && !ids.has(edge.targetId)), activeNodeId, rootId };
+          return { ...recordHistory(state, `删除“${state.nodes[nodeId].title}”及其子节点`), nodes, edges: state.edges.filter((edge) => !ids.has(edge.sourceId) && !ids.has(edge.targetId)), activeNodeId, rootId };
         }),
 
       replaceTree: (nodes, edges = []) => {
@@ -126,7 +139,7 @@ export const useTreeStore = create<TreeState>()(
           Object.entries(nodes).map(([id, node]) => [id, { ...node, createdAt: new Date(node.createdAt) }])
         );
         const rootId = Object.values(normalizedNodes).find((node) => node.parentId === null)?.id ?? null;
-        set({ nodes: normalizedNodes, edges: edges.filter((edge) => normalizedNodes[edge.sourceId] && normalizedNodes[edge.targetId]), previousGraph: null, nextGraph: null, rootId, activeNodeId: rootId, sessionId: null, isLoading: false });
+        set((state) => ({ ...recordHistory(state, '导入知识树'), nodes: normalizedNodes, edges: edges.filter((edge) => normalizedNodes[edge.sourceId] && normalizedNodes[edge.targetId]), previousGraph: null, nextGraph: null, rootId, activeNodeId: rootId, sessionId: null, isLoading: false }));
       },
 
       moveNode: (nodeId, parentId) => {
@@ -142,7 +155,7 @@ export const useTreeStore = create<TreeState>()(
             nodes[parentId] = { ...nodes[parentId], children: [...new Set([...nodes[parentId].children, nodeId])], isExpanded: true };
           }
           nodes[nodeId] = { ...node, parentId, relationType: parentId ? node.relationType === 'root' ? 'related' : node.relationType : 'root' };
-          return { nodes, rootId: Object.values(nodes).find((item) => item.parentId === null)?.id ?? null };
+          return { ...recordHistory(current, `移动“${node.title}”`), nodes, rootId: Object.values(nodes).find((item) => item.parentId === null)?.id ?? null };
         });
         return true;
       },
@@ -158,6 +171,7 @@ export const useTreeStore = create<TreeState>()(
             if (node.parentId && nextNodes[node.parentId]) nextNodes[node.parentId].children.push(node.id);
           });
           return {
+            ...recordHistory(state, '应用智能图谱整理'),
             previousGraph: { nodes: state.nodes, edges: state.edges },
             nextGraph: null,
             nodes: nextNodes,
@@ -203,10 +217,40 @@ export const useTreeStore = create<TreeState>()(
             nodes[id] = { ...node, parentId: node.parentId === removeId ? keepId : node.parentId, children: node.children.map((childId) => childId === removeId ? keepId : childId).filter((childId, index, all) => childId !== id && all.indexOf(childId) === index) };
           });
           const edges = current.edges.map((edge) => ({ ...edge, sourceId: edge.sourceId === removeId ? keepId : edge.sourceId, targetId: edge.targetId === removeId ? keepId : edge.targetId })).filter((edge, index, all) => edge.sourceId !== edge.targetId && all.findIndex((item) => item.sourceId === edge.sourceId && item.targetId === edge.targetId && item.type === edge.type) === index);
-          return { nodes, edges, activeNodeId: current.activeNodeId === removeId ? keepId : current.activeNodeId };
+          return { ...recordHistory(current, `合并“${remove.title}”到“${keep.title}”`), nodes, edges, activeNodeId: current.activeNodeId === removeId ? keepId : current.activeNodeId };
         });
         return true;
       },
+
+      importMaterial: (result, source) => {
+        if (!result.items.length) return 0;
+        const ids = result.items.map(() => `material-${crypto.randomUUID()}`);
+        set((state) => {
+          const imported = Object.fromEntries(result.items.map((item, index) => {
+            const parentId = item.parentIndex !== null && ids[item.parentIndex] ? ids[item.parentIndex] : null;
+            return [ids[index], { id: ids[index], parentId, type: 'explanation' as const, title: item.title, content: item.content, children: [] as string[], isExpanded: true, createdAt: new Date(), tags: item.tags, relationType: parentId ? item.relationType : 'root', relationReason: '从导入资料中提取', source: { ...source, excerpt: item.sourceExcerpt } }];
+          }));
+          Object.values(imported).forEach((node) => { if (node.parentId && imported[node.parentId]) imported[node.parentId].children.push(node.id); });
+          const importedEdges = result.edges.filter((edge) => ids[edge.sourceIndex] && ids[edge.targetIndex] && edge.sourceIndex !== edge.targetIndex).map((edge, index) => ({ id: `material-edge-${Date.now()}-${index}`, sourceId: ids[edge.sourceIndex], targetId: ids[edge.targetIndex], type: edge.type, reason: edge.reason, confidence: edge.confidence }));
+          const nodes = { ...state.nodes, ...imported };
+          return { ...recordHistory(state, `导入资料“${source?.name || '未命名资料'}”`), nodes, edges: [...state.edges, ...importedEdges], activeNodeId: ids[0], rootId: state.rootId || ids.find((id) => imported[id].parentId === null) || null };
+        });
+        return result.items.length;
+      },
+
+      undo: () => set((state) => {
+        const entry = state.historyPast[state.historyPast.length - 1];
+        if (!entry) return state;
+        const current = { nodes: state.nodes, edges: state.edges, label: entry.label, createdAt: new Date().toISOString() };
+        return { nodes: entry.nodes, edges: entry.edges, historyPast: state.historyPast.slice(0, -1), historyFuture: [current, ...state.historyFuture].slice(0, 30), activeNodeId: entry.nodes[state.activeNodeId || ''] ? state.activeNodeId : Object.keys(entry.nodes)[0] || null, rootId: Object.values(entry.nodes).find((node) => node.parentId === null)?.id ?? null };
+      }),
+
+      redo: () => set((state) => {
+        const entry = state.historyFuture[0];
+        if (!entry) return state;
+        const current = { nodes: state.nodes, edges: state.edges, label: entry.label, createdAt: new Date().toISOString() };
+        return { nodes: entry.nodes, edges: entry.edges, historyPast: [...state.historyPast, current].slice(-30), historyFuture: state.historyFuture.slice(1), activeNodeId: entry.nodes[state.activeNodeId || ''] ? state.activeNodeId : Object.keys(entry.nodes)[0] || null, rootId: Object.values(entry.nodes).find((node) => node.parentId === null)?.id ?? null };
+      }),
 
       getNode: (nodeId) => {
         const { nodes } = get();
@@ -238,6 +282,8 @@ export const useTreeStore = create<TreeState>()(
           edges: state?.edges || currentState.edges,
           previousGraph: null,
           nextGraph: null,
+          historyPast: [],
+          historyFuture: [],
           isLoading: false,
         };
       },

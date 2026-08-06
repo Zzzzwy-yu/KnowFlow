@@ -2,6 +2,17 @@ import { Request, Response } from 'express';
 import { llmService } from '../services/llmService.js';
 
 export const llmController = {
+  async importMaterial(req: Request, res: Response) {
+    const { title, content } = req.body;
+    if (typeof title !== 'string' || typeof content !== 'string' || !title.trim() || !content.trim()) return res.status(400).json({ error: 'Title and content are required' });
+    if (title.length > 200 || content.length > 100000) return res.status(413).json({ error: 'Material is too large' });
+    try {
+      return res.json(await llmService.extractMaterial(title.trim(), content));
+    } catch {
+      return res.status(500).json({ error: 'Material extraction failed' });
+    }
+  },
+
   async analyzeGraph(req: Request, res: Response) {
     const { nodes } = req.body;
     if (!Array.isArray(nodes) || nodes.length < 2 || nodes.length > 120) return res.status(400).json({ error: 'Graph analysis requires 2-120 nodes' });
@@ -31,7 +42,7 @@ export const llmController = {
 
   async chat(req: Request, res: Response) {
     try {
-      const { message, sessionId, context } = req.body;
+      const { message, sessionId, context, depth } = req.body;
 
       if (typeof message !== 'string' || !message.trim()) {
         return res.status(400).json({ error: 'Message is required' });
@@ -40,7 +51,10 @@ export const llmController = {
         return res.status(413).json({ error: 'Chat request is too large' });
       }
 
-      const response = await llmService.getChatResponse(message, sessionId, context);
+      const allowedDepths = ['brief', 'beginner', 'professional', 'academic'];
+      const selectedDepth = allowedDepths.includes(depth) ? depth : 'beginner';
+      const startedAt = Date.now();
+      const response = await llmService.getChatResponse(message, sessionId, context, selectedDepth);
 
       res.json({
         id: `chat-${Date.now()}`,
@@ -48,6 +62,8 @@ export const llmController = {
         words: response.words,
         sessionId: response.sessionId,
         provider: response.provider,
+        durationMs: Date.now() - startedAt,
+        estimatedTokens: Math.ceil(response.content.length / 2.5),
       });
     } catch (error) {
       res.status(500).json({ error: 'Internal server error' });

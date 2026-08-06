@@ -7,6 +7,7 @@ export interface WordInfo {
 export interface ChatRequest {
   message: string;
   sessionId?: string;
+  depth?: 'brief' | 'beginner' | 'professional' | 'academic';
 }
 
 export interface ChatResponse {
@@ -73,4 +74,18 @@ export interface GraphProposal {
   placements: Record<string, KnowledgePlacement>;
   edges: KnowledgeEdge[];
   duplicates: DuplicateSuggestion[];
+}
+
+export interface MaterialKnowledgeItem {
+  title: string;
+  content: string;
+  tags: string[];
+  sourceExcerpt: string;
+  parentIndex: number | null;
+  relationType: KnowledgeRelation;
+}
+
+export interface MaterialImportResult {
+  items: MaterialKnowledgeItem[];
+  edges: Array<{ sourceIndex: number; targetIndex: number; type: Exclude<KnowledgeRelation, 'root'>; reason: string; confidence: number }>;
 }

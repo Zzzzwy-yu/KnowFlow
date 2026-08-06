@@ -22,7 +22,11 @@ export interface ChatResponse {
   relatedTerms?: string[];
   provider?: string;
   isFallback?: boolean;
+  durationMs?: number;
+  estimatedTokens?: number;
 }
+
+export type AnswerDepth = 'brief' | 'beginner' | 'professional' | 'academic';
 
 export interface ExplainRequest {
   word: string;
@@ -59,6 +63,15 @@ export interface TreeNode {
   tags?: string[];
   provider?: string;
   isFallback?: boolean;
+  originalPrompt?: string;
+  answerDepth?: AnswerDepth;
+  durationMs?: number;
+  estimatedTokens?: number;
+  source?: {
+    name: string;
+    kind: 'markdown' | 'text' | 'paste' | 'json';
+    excerpt?: string;
+  };
 }
 
 export type KnowledgeRelation = 'root' | 'prerequisite' | 'contains' | 'detail' | 'example' | 'comparison' | 'related';
@@ -84,6 +97,30 @@ export interface GraphProposal {
   duplicates: DuplicateSuggestion[];
 }
 
+export interface GraphSnapshot {
+  nodes: Record<string, TreeNode>;
+  edges: KnowledgeEdge[];
+}
+
+export interface HistoryEntry extends GraphSnapshot {
+  label: string;
+  createdAt: string;
+}
+
+export interface MaterialKnowledgeItem {
+  title: string;
+  content: string;
+  tags: string[];
+  sourceExcerpt: string;
+  parentIndex: number | null;
+  relationType: KnowledgeRelation;
+}
+
+export interface MaterialImportResult {
+  items: MaterialKnowledgeItem[];
+  edges: Array<{ sourceIndex: number; targetIndex: number; type: Exclude<KnowledgeRelation, 'root'>; reason: string; confidence: number }>;
+}
+
 export interface KnowledgePlacement {
   parentId: string | null;
   relationType: KnowledgeRelation;
@@ -98,6 +135,8 @@ export interface TreeState {
   edges: KnowledgeEdge[];
   previousGraph: { nodes: Record<string, TreeNode>; edges: KnowledgeEdge[] } | null;
   nextGraph: { nodes: Record<string, TreeNode>; edges: KnowledgeEdge[] } | null;
+  historyPast: HistoryEntry[];
+  historyFuture: HistoryEntry[];
   rootId: string | null;
   activeNodeId: string | null;
   isLoading: boolean;
@@ -111,6 +150,7 @@ export interface TreeState {
   setSessionId: (sessionId: string) => void;
   clearTree: () => void;
   updateNode: (nodeId: string, updates: Partial<Pick<TreeNode, 'title' | 'content' | 'tags'>>) => void;
+  updateNodeTransient: (nodeId: string, updates: Partial<TreeNode>) => void;
   deleteNode: (nodeId: string) => void;
   replaceTree: (nodes: Record<string, TreeNode>, edges?: KnowledgeEdge[]) => void;
   moveNode: (nodeId: string, parentId: string | null) => boolean;
@@ -118,6 +158,9 @@ export interface TreeState {
   undoGraphChange: () => void;
   redoGraphChange: () => void;
   mergeNodes: (keepId: string, removeId: string) => boolean;
+  importMaterial: (result: MaterialImportResult, source: NonNullable<TreeNode['source']>) => number;
+  undo: () => void;
+  redo: () => void;
   getNode: (nodeId: string) => TreeNode | undefined;
   getChildren: (nodeId: string) => TreeNode[];
 }

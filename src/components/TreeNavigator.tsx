@@ -1,8 +1,10 @@
 import { useTreeStore } from '@/store/chatStore';
 import type { GraphProposal, TreeNode } from '@/types';
-import { ChevronRight, ChevronDown, Circle, Download, Search, Upload, Sparkles, FileText, Undo2, Redo2, X } from 'lucide-react';
+import { ChevronRight, ChevronDown, Circle, Download, Search, Upload, Sparkles, FileText, Undo2, Redo2, X, History, BookPlus } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+
+interface TreeNavigatorProps { onImportMaterial: () => void; }
 import { chatApi } from '@/utils/apiClient';
 
 function TreeNodeItem({ node, depth }: { node: TreeNode; depth: number }) {
@@ -73,12 +75,13 @@ function TreeNodeItem({ node, depth }: { node: TreeNode; depth: number }) {
   );
 }
 
-export function TreeNavigator() {
-  const { nodes, edges, clearTree, replaceTree, setActiveNode, applyGraphProposal, undoGraphChange, redoGraphChange, previousGraph, nextGraph, mergeNodes } = useTreeStore();
+export function TreeNavigator({ onImportMaterial }: TreeNavigatorProps) {
+  const { nodes, edges, clearTree, replaceTree, setActiveNode, applyGraphProposal, mergeNodes, historyPast, historyFuture, undo, redo } = useTreeStore();
   const [query, setQuery] = useState('');
   const [organizing, setOrganizing] = useState(false);
   const [proposal, setProposal] = useState<GraphProposal | null>(null);
   const [organizeError, setOrganizeError] = useState<string | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -142,17 +145,6 @@ export function TreeNavigator() {
     }
   };
 
-  if (rootNodes.length === 0) {
-    return (
-      <div className="h-full flex flex-col items-center justify-center text-gray-400">
-        <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
-          <Circle className="w-8 h-8" />
-        </div>
-        <p className="text-sm">开始提问以创建知识树</p>
-      </div>
-    );
-  }
-
   return (
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
@@ -160,9 +152,11 @@ export function TreeNavigator() {
         <div className="flex items-center gap-1">
           <button title="AI 智能重组整棵知识树" disabled={organizing || Object.keys(nodes).length < 2} onClick={organizeTree} className="p-1.5 text-primary hover:bg-orange-50 rounded disabled:opacity-30"><Sparkles className={`w-4 h-4 ${organizing ? 'animate-spin' : ''}`} /></button>
           {organizing && <button title="取消分析" onClick={() => abortRef.current?.abort()} className="p-1.5 text-red-500"><X className="w-4 h-4" /></button>}
-          {previousGraph && <button title="撤销上次图谱整理" onClick={undoGraphChange} className="p-1.5 text-blue-500 hover:bg-blue-50 rounded"><Undo2 className="w-4 h-4" /></button>}
-          {nextGraph && <button title="重做图谱整理" onClick={redoGraphChange} className="p-1.5 text-blue-500 hover:bg-blue-50 rounded"><Redo2 className="w-4 h-4" /></button>}
+          <button title="撤销 Ctrl+Z" disabled={!historyPast.length} onClick={undo} className="p-1.5 text-blue-500 hover:bg-blue-50 rounded disabled:opacity-30"><Undo2 className="w-4 h-4" /></button>
+          <button title="重做 Ctrl+Shift+Z" disabled={!historyFuture.length} onClick={redo} className="p-1.5 text-blue-500 hover:bg-blue-50 rounded disabled:opacity-30"><Redo2 className="w-4 h-4" /></button>
+          <button title="操作历史" onClick={() => setHistoryOpen((open) => !open)} className="p-1.5 text-gray-400 hover:text-primary"><History className="w-4 h-4" /></button>
           <button title="导出 Markdown" onClick={exportMarkdown} className="p-1.5 text-gray-400 hover:text-primary"><FileText className="w-4 h-4" /></button>
+          <button title="导入学习资料" onClick={onImportMaterial} className="p-1.5 text-gray-400 hover:text-primary"><BookPlus className="w-4 h-4" /></button>
           <button title="导入" onClick={() => fileInputRef.current?.click()} className="p-1.5 text-gray-400 hover:text-primary"><Upload className="w-4 h-4" /></button>
           <button title="导出" onClick={exportTree} className="p-1.5 text-gray-400 hover:text-primary"><Download className="w-4 h-4" /></button>
           <button onClick={() => window.confirm('确定清空整棵知识树吗？此操作不可撤销。') && clearTree()} className="text-xs text-gray-400 hover:text-red-500 transition-colors">清空</button>
@@ -175,8 +169,9 @@ export function TreeNavigator() {
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索标题、内容或标签" className="w-full bg-transparent text-sm outline-none" />
         </label>
       </div>
+      {historyOpen && <div className="max-h-52 overflow-y-auto border-b bg-slate-50 p-3"><div className="mb-2 flex items-center justify-between text-xs font-semibold text-gray-600"><span>最近操作（{historyPast.length}/30）</span><button onClick={() => setHistoryOpen(false)}><X className="h-3.5 w-3.5" /></button></div>{[...historyPast].reverse().map((entry, index) => <div key={`${entry.createdAt}-${index}`} className="border-l-2 border-blue-200 py-1.5 pl-2 text-xs"><p className="text-gray-700">{entry.label}</p><p className="text-gray-400">{new Date(entry.createdAt).toLocaleTimeString()}</p></div>)}{!historyPast.length && <p className="py-3 text-center text-xs text-gray-400">暂无可撤销操作</p>}</div>}
       <div className="flex-1 overflow-y-auto">
-        {query.trim() ? <div className="p-2 space-y-1">
+        {rootNodes.length === 0 ? <div className="flex h-full flex-col items-center justify-center px-5 text-center text-gray-400"><div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gray-100"><Circle className="h-8 w-8" /></div><p className="text-sm">提问或导入资料以创建知识树</p><button onClick={onImportMaterial} className="mt-4 flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm text-white shadow"><BookPlus className="h-4 w-4" />上传学习资料</button></div> : query.trim() ? <div className="p-2 space-y-1">
           {matches.map((node) => <button key={node.id} onClick={() => setActiveNode(node.id)} className="w-full text-left px-3 py-2 rounded-lg hover:bg-gray-50 text-sm"><span className="block truncate text-gray-700">{node.title}</span><span className="text-xs text-gray-400">{node.tags?.join(' · ') || '未标记'}</span></button>)}
           {matches.length === 0 && <p className="p-4 text-center text-sm text-gray-400">没有匹配的知识点</p>}
         </div> : rootNodes.map((rootNode) => <TreeNodeItem key={rootNode.id} node={rootNode} depth={0} />)}

@@ -11,6 +11,8 @@ interface DetailPanelProps {
   onUpdate: (nodeId: string, updates: Partial<Pick<TreeNode, 'title' | 'content' | 'tags'>>) => void;
   onDelete: (nodeId: string) => void;
   onMove: (nodeId: string, parentId: string | null) => boolean;
+  onRegenerate: (nodeId: string) => void;
+  isLoading: boolean;
 }
 
 function renderTokensWithKeywords(tokens: Tokens.Generic[], words: WordInfo[], onWordClick: (word: string) => void, textOffset: number = 0): JSX.Element[] {
@@ -175,7 +177,7 @@ function RelatedTermsSection({ relatedTerms, onWordClick }: { relatedTerms: stri
   );
 }
 
-export function DetailPanel({ node, nodes, onWordClick, onUpdate, onDelete, onMove }: DetailPanelProps) {
+export function DetailPanel({ node, nodes, onWordClick, onUpdate, onDelete, onMove, onRegenerate, isLoading }: DetailPanelProps) {
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(node.title);
   const [content, setContent] = useState(node.content);
@@ -203,17 +205,22 @@ export function DetailPanel({ node, nodes, onWordClick, onUpdate, onDelete, onMo
         <div className="flex gap-1">
           {editing ? <><button title="保存" onClick={save} className="p-2 text-green-600 hover:bg-green-50 rounded-lg"><Check className="w-4 h-4" /></button><button title="取消" onClick={() => { setEditing(false); setTitle(node.title); setContent(node.content); }} className="p-2 text-gray-500 hover:bg-gray-100 rounded-lg"><X className="w-4 h-4" /></button></> : <button title="编辑" onClick={() => setEditing(true)} className="p-2 text-gray-500 hover:text-primary hover:bg-orange-50 rounded-lg"><Pencil className="w-4 h-4" /></button>}
           <button title="删除节点及其子节点" onClick={() => window.confirm(`确定删除“${node.title}”及其全部子节点吗？`) && onDelete(node.id)} className="p-2 text-gray-500 hover:text-red-500 hover:bg-red-50 rounded-lg"><Trash2 className="w-4 h-4" /></button>
+          {node.originalPrompt && <button disabled={isLoading} title="重新生成回答" onClick={() => onRegenerate(node.id)} className="rounded-lg px-2 py-1 text-xs text-primary hover:bg-orange-50 disabled:opacity-30">重新生成</button>}
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-3 pb-40 bg-gradient-to-br from-gray-50 to-gray-100 sm:p-6 sm:pb-48">
+      <div className="flex-1 overflow-y-auto p-3 pb-6 bg-gradient-to-br from-gray-50 to-gray-100 sm:p-6">
         <div className="max-w-3xl mx-auto space-y-4">
           <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
             <span className="px-2 py-1 rounded-full bg-blue-50 text-blue-600">{node.relationType || 'root'}</span>
             {node.provider && <span className={`px-2 py-1 rounded-full ${node.isFallback ? 'bg-amber-100 text-amber-700' : 'bg-green-50 text-green-700'}`}>{node.isFallback ? '离线内容' : node.provider}</span>}
+            {node.answerDepth && <span className="rounded-full bg-purple-50 px-2 py-1 text-purple-600">{({ brief: '一句话', beginner: '入门', professional: '专业', academic: '论文级' } as const)[node.answerDepth]}</span>}
+            {typeof node.durationMs === 'number' && <span>{node.durationMs === 0 ? '缓存命中' : `${(node.durationMs / 1000).toFixed(1)} 秒`}</span>}
+            {node.estimatedTokens && <span>约 {node.estimatedTokens} tokens</span>}
             {node.relationReason && <span>{node.relationReason}</span>}
             {!editing && node.tags?.map((tag) => <span key={tag} className="px-2 py-1 rounded-full bg-gray-200">#{tag}</span>)}
           </div>
+          {node.source && <details className="rounded-xl border border-indigo-100 bg-indigo-50/70 p-3 text-sm"><summary className="cursor-pointer font-medium text-indigo-700">来源：{node.source.name}</summary>{node.source.excerpt && <blockquote className="mt-2 border-l-2 border-indigo-300 pl-3 text-xs leading-relaxed text-gray-600">{node.source.excerpt}</blockquote>}</details>}
           <div className="flex flex-col gap-2 rounded-xl border border-gray-200 bg-white p-3 text-sm sm:flex-row sm:items-center">
             <label className="text-gray-500 shrink-0">上位知识点</label>
             <select value={node.parentId || ''} onChange={(event) => { if (!onMove(node.id, event.target.value || null)) window.alert('不能将节点移动到自身或其子节点下。'); }} className="min-w-0 flex-1 bg-transparent outline-none text-gray-700">
@@ -236,7 +243,7 @@ export function DetailPanel({ node, nodes, onWordClick, onUpdate, onDelete, onMo
   );
 }
 
-export function EmptyPanel() {
+export function EmptyPanel({ onImportMaterial }: { onImportMaterial: () => void }) {
   return (
     <div className="h-full flex flex-col items-center justify-center text-gray-400">
       <div className="w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center mb-6">
@@ -246,6 +253,7 @@ export function EmptyPanel() {
       <p className="text-sm text-gray-400 max-w-md text-center">
         在底部输入框中输入问题，AI会为你解答。点击回答中的橙色词语可以深入了解，知识树会自动生成。
       </p>
+      <button onClick={onImportMaterial} className="mt-5 inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-medium text-white shadow-md hover:bg-primary/90">上传 Markdown / TXT 资料</button>
     </div>
   );
 }

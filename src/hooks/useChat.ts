@@ -1,7 +1,7 @@
 import { useTreeStore } from '@/store/chatStore';
 import { chatApi } from '@/utils/apiClient';
-import type { KnowledgePlacement, TreeNode } from '@/types';
-import { useState } from 'react';
+import type { AnswerDepth, KnowledgePlacement, TreeNode } from '@/types';
+import { useRef, useState } from 'react';
 
 const generateId = (prefix: string) => `${prefix}-${crypto.randomUUID()}`;
 
@@ -26,13 +26,29 @@ const fallbackPlacement = (title: string, content: string, nodes: Record<string,
 
 export function useChat() {
   const [error, setError] = useState<string | null>(null);
-  const { nodes, rootId, activeNodeId, isLoading, addNode, addChild, setRootId, setActiveNode, setLoading, setSessionId, clearTree, getNode } = useTreeStore();
+  const [answerDepth, setAnswerDepth] = useState<AnswerDepth>('beginner');
+  const abortRef = useRef<AbortController | null>(null);
+  const queueRef = useRef<Array<{ input: string; parentNodeId?: string | null }>>([]);
+  const [queuedCount, setQueuedCount] = useState(0);
+  const { nodes, rootId, activeNodeId, isLoading, addNode, addChild, updateNodeTransient, setRootId, setActiveNode, setLoading, setSessionId, clearTree, getNode } = useTreeStore();
+
+  const revealContent = async (nodeId: string, content: string, signal: AbortSignal) => {
+    const chunkSize = Math.max(8, Math.ceil(content.length / 80));
+    for (let end = chunkSize; end < content.length; end += chunkSize) {
+      if (signal.aborted) return false;
+      updateNodeTransient(nodeId, { content: content.slice(0, end) });
+      await new Promise((resolve) => setTimeout(resolve, 18));
+    }
+    if (!signal.aborted) updateNodeTransient(nodeId, { content });
+    return !signal.aborted;
+  };
 
   const sendMessage = async (input: string, parentNodeId?: string | null) => {
     if (!input.trim()) return;
 
     setLoading(true);
     setError(null);
+    abortRef.current = new AbortController();
 
     try {
       const targetParentId = parentNodeId ?? null;
@@ -40,7 +56,7 @@ export function useChat() {
       const parentNode = targetParentId ? getNode(targetParentId) : null;
       const context = parentNode ? `${parentNode.title}: ${parentNode.content}` : undefined;
 
-      const response = await chatApi.sendMessage(input.trim(), rootId ? nodes[rootId]?.sessionId : undefined, context);
+      const response = await chatApi.sendMessage(input.trim(), rootId ? nodes[rootId]?.sessionId : undefined, context, answerDepth, abortRef.current.signal);
       if (response.isFallback) setError('后端或模型暂时不可用，本次展示的是本地离线内容。');
 
       const placement = await chatApi.organizeKnowledge(input.trim(), response.content, nodes, targetParentId)
@@ -51,7 +67,7 @@ export function useChat() {
         parentId: resolvedParentId,
         type: 'question',
         title: placement.normalizedTitle || input.trim(),
-        content: response.content,
+        content: '',
         words: response.words,
         children: [],
         isExpanded: true,
@@ -64,6 +80,11 @@ export function useChat() {
         tags: placement.tags,
         provider: response.provider,
         isFallback: response.isFallback,
+        originalPrompt: input.trim(),
+        answerDepth,
+        durationMs: response.durationMs,
+        estimatedTokens: response.estimatedTokens,
+        sessionId: response.sessionId,
       };
 
       if (resolvedParentId) {
@@ -76,11 +97,16 @@ export function useChat() {
       }
 
       setActiveNode(questionNode.id);
+      await revealContent(questionNode.id, response.content, abortRef.current.signal);
 
       if (!rootId) {
         setSessionId(response.sessionId);
       }
     } catch (error) {
+      if (abortRef.current?.signal.aborted) {
+        setError('已停止本次生成。');
+        return;
+      }
       setError(error instanceof Error ? error.message : '请求失败，请稍后重试。');
       const targetParentId = parentNodeId ?? null;
 
@@ -96,17 +122,20 @@ export function useChat() {
         createdAt: new Date(),
       };
 
-      addNode(questionNode);
-
       if (targetParentId) {
         addChild(targetParentId, questionNode);
-      } else if (!rootId) {
-        setRootId(questionNode.id);
+      } else {
+        addNode(questionNode);
+        if (!rootId) setRootId(questionNode.id);
       }
 
       setActiveNode(questionNode.id);
     } finally {
       setLoading(false);
+      abortRef.current = null;
+      const next = queueRef.current.shift();
+      setQueuedCount(queueRef.current.length);
+      if (next) window.setTimeout(() => sendMessage(next.input, next.parentNodeId), 0);
     }
   };
 
@@ -181,5 +210,27 @@ export function useChat() {
     getNode,
     error,
     clearError: () => setError(null),
+    answerDepth,
+    setAnswerDepth,
+    stopGeneration: () => abortRef.current?.abort(),
+    queueMessage: (input: string, parentNodeId?: string | null) => {
+      if (!input.trim()) return;
+      queueRef.current.push({ input: input.trim(), parentNodeId });
+      setQueuedCount(queueRef.current.length);
+    },
+    queuedCount,
+    regenerate: async (nodeId: string) => {
+      const node = getNode(nodeId);
+      if (!node?.originalPrompt || isLoading) return;
+      setLoading(true); setError(null); abortRef.current = new AbortController();
+      try {
+        const parent = node.parentId ? getNode(node.parentId) : null;
+        const response = await chatApi.sendMessage(node.originalPrompt, node.sessionId, parent?.content, node.answerDepth || answerDepth, abortRef.current.signal, true);
+        updateNodeTransient(nodeId, { content: '', words: response.words, provider: response.provider, isFallback: response.isFallback, durationMs: response.durationMs, estimatedTokens: response.estimatedTokens });
+        await revealContent(nodeId, response.content, abortRef.current.signal);
+      } catch (reason) {
+        if (!abortRef.current?.signal.aborted) setError(reason instanceof Error ? reason.message : '重新生成失败。');
+      } finally { setLoading(false); abortRef.current = null; }
+    },
   };
 }

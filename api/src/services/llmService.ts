@@ -1,6 +1,6 @@
 import OpenAI from 'openai';
 import axios from 'axios';
-import type { WordInfo, ExplainResponse, KnowledgePlacement, KnowledgeRelation, OrganizeKnowledgeRequest, GraphProposal, KnowledgeNodeSummary, KnowledgeEdge, DuplicateSuggestion } from '../types/index.js';
+import type { WordInfo, ExplainResponse, KnowledgePlacement, KnowledgeRelation, OrganizeKnowledgeRequest, GraphProposal, KnowledgeNodeSummary, KnowledgeEdge, DuplicateSuggestion, MaterialImportResult } from '../types/index.js';
 
 type Message = { role: 'system' | 'user' | 'assistant'; content: string };
 
@@ -405,7 +405,45 @@ const normalizeGraphProposal = (value: unknown, nodes: KnowledgeNodeSummary[]): 
   return { placements, edges, duplicates };
 };
 
+const fallbackMaterialImport = (title: string, content: string): MaterialImportResult => {
+  const sections = content.split(/\n(?=#{1,6}\s)|\n{2,}/).map((part) => part.trim()).filter(Boolean).slice(0, 40);
+  const items = sections.map((section, index) => {
+    const heading = section.match(/^#{1,6}\s+(.+)$/m)?.[1]?.trim();
+    const clean = section.replace(/^#{1,6}\s+.+$/m, '').trim() || section;
+    return { title: heading || (index === 0 ? title : clean.slice(0, 32)), content: clean.slice(0, 3000), tags: [], sourceExcerpt: clean.slice(0, 300), parentIndex: index === 0 ? null : 0, relationType: index === 0 ? 'root' as const : 'detail' as const };
+  });
+  return { items: items.length ? items : [{ title, content: content.slice(0, 3000), tags: [], sourceExcerpt: content.slice(0, 300), parentIndex: null, relationType: 'root' }], edges: [] };
+};
+
+const normalizeMaterialImport = (value: unknown, title: string, content: string): MaterialImportResult => {
+  if (!value || typeof value !== 'object') return fallbackMaterialImport(title, content);
+  const raw = value as { items?: Array<Record<string, unknown>>; edges?: Array<Record<string, unknown>> };
+  if (!Array.isArray(raw.items) || !raw.items.length) return fallbackMaterialImport(title, content);
+  const items = raw.items.slice(0, 60).map((item, index) => {
+    const parentIndex = typeof item.parentIndex === 'number' && item.parentIndex >= 0 && item.parentIndex < raw.items!.length && item.parentIndex !== index ? item.parentIndex : null;
+    const requestedRelation = typeof item.relationType === 'string' && relationTypes.has(item.relationType as KnowledgeRelation) ? item.relationType as KnowledgeRelation : parentIndex === null ? 'root' : 'detail';
+    return { title: String(item.title || `知识点 ${index + 1}`).slice(0, 100), content: String(item.content || '').slice(0, 5000), tags: Array.isArray(item.tags) ? item.tags.filter((tag): tag is string => typeof tag === 'string').slice(0, 10) : [], sourceExcerpt: String(item.sourceExcerpt || '').slice(0, 800), parentIndex, relationType: parentIndex === null ? 'root' as const : requestedRelation };
+  });
+  const edges = (Array.isArray(raw.edges) ? raw.edges : []).filter((edge) => Number.isInteger(edge.sourceIndex) && Number.isInteger(edge.targetIndex) && Number(edge.sourceIndex) >= 0 && Number(edge.sourceIndex) < items.length && Number(edge.targetIndex) >= 0 && Number(edge.targetIndex) < items.length && edge.sourceIndex !== edge.targetIndex && typeof edge.type === 'string' && edge.type !== 'root' && relationTypes.has(edge.type as KnowledgeRelation)).slice(0, 180).map((edge) => ({ sourceIndex: Number(edge.sourceIndex), targetIndex: Number(edge.targetIndex), type: edge.type as MaterialImportResult['edges'][number]['type'], reason: String(edge.reason || '来自同一资料').slice(0, 200), confidence: typeof edge.confidence === 'number' ? Math.max(0, Math.min(1, edge.confidence)) : 0.7 }));
+  return { items, edges };
+};
+
 export const llmService = {
+  async extractMaterial(title: string, content: string): Promise<MaterialImportResult> {
+    const provider = getProvider();
+    if (!provider) return fallbackMaterialImport(title, content);
+    try {
+      const response = await provider.chat([
+        { role: 'system', content: '你是资料结构化助手。提取独立、精炼且可学习的知识点，保留能在原文定位的引用片段。只输出合法 JSON。' },
+        { role: 'user', content: `资料名称：${title}\n资料正文：\n${content.slice(0, 50000)}\n\n返回 {"items":[{"title":"知识点","content":"准确总结","tags":["标签"],"sourceExcerpt":"原文中的短引用","parentIndex":null或父项下标,"relationType":"root|contains|detail|example|prerequisite|comparison|related"}],"edges":[{"sourceIndex":0,"targetIndex":1,"type":"prerequisite|contains|detail|example|comparison|related","reason":"理由","confidence":0.8}]}。最多60个知识点；不要编造资料中没有的事实。` },
+      ]);
+      return normalizeMaterialImport(JSON.parse(response.match(/\{[\s\S]*\}/)?.[0] || response), title, content);
+    } catch (error) {
+      console.error('Material extraction error:', error);
+      return fallbackMaterialImport(title, content);
+    }
+  },
+
   async analyzeKnowledgeGraph(nodes: KnowledgeNodeSummary[]): Promise<GraphProposal> {
     if (nodes.length < 2) return fallbackGraphProposal(nodes);
     const provider = getProvider();
@@ -451,7 +489,7 @@ export const llmService = {
     }
   },
 
-  async getChatResponse(message: string, sessionId?: string, context?: string): Promise<{ content: string; words: WordInfo[]; sessionId: string; provider: string }> {
+  async getChatResponse(message: string, sessionId?: string, context?: string, depth: 'brief' | 'beginner' | 'professional' | 'academic' = 'beginner'): Promise<{ content: string; words: WordInfo[]; sessionId: string; provider: string }> {
     const currentSessionId = sessionId || generateSessionId();
     const currentProvider = getProvider();
     const DEMO_MODE = !currentProvider;
@@ -478,7 +516,8 @@ export const llmService = {
 
     const contextPrompt = context ? `上下文信息：${context}\n\n请基于以上上下文回答用户的问题。如果用户的问题与上下文相关，请结合上下文进行回答。` : '';
     
-    const systemPrompt = `你是一个耐心的"KnowFlow"AI助手。请用通俗易懂的语言回答用户的问题。
+    const depthInstruction = { brief: '使用一句话到一个短段落回答，只保留核心结论。', beginner: '面向初学者，用通俗语言、类比和简单示例回答。', professional: '面向专业学习者，给出严谨定义、机制、适用条件和示例。', academic: '采用学术表达，说明理论背景、关键假设、推导关系、局限性和研究语境。' }[depth];
+    const systemPrompt = `你是一个耐心的"KnowFlow"AI助手。${depthInstruction}
     ${contextPrompt}
     你的回答应该包含一些专业术语或概念，但要用简单的语言解释。
     在回答中，请使用【关键词】的格式标记出3-5个可能需要进一步解释的关键词语。

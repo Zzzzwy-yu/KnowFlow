@@ -1,304 +1,171 @@
 # KnowFlow
 
-AI 驱动的交互式学习助手，帮助用户通过逐层深入的方式理解复杂概念。
+KnowFlow 是一个 AI 驱动的交互式学习助手。它可以把问题或学习材料整理成可探索的知识树，并通过知识图谱、节点详情和多轮问答帮助用户逐层理解复杂概念。
 
-## 🌟 核心功能
+## 核心功能
 
-### 智能知识结构
+- AI 问答：支持一句话、入门、专业和论文级四种回答深度。
+- 知识树：从问答和导入材料中提取知识点、层级和横向关系。
+- 知识图谱：支持树视图和图谱视图切换、缩放、拖拽、全屏、局部视图及关系筛选。
+- 知识管理：编辑、删除、移动、合并、搜索和手动调整父节点，并检测循环引用。
+- 材料导入：支持 Markdown、TXT 和直接粘贴文本；单次最多提取 60 个知识点、180 条横向关系。
+- 数据导入导出：支持 KnowFlow JSON 备份恢复和 Markdown 导出。
+- 操作历史：编辑、删除、移动、合并、导入和智能整理等操作支持撤销/重做，最多保留 30 次。
+- 持久化：知识树状态自动保存到浏览器 `localStorage`。
+- Demo 模式：未配置 API Key 时自动使用内置 mock 数据。
 
-- 新问题生成回答后，由 AI 根据概念的包含、前置、细化、实例、比较和关联关系选择合理父节点，而不是简单按提问时间挂载
-- 每个节点保存关系类型、归类理由和语义标签；模型不可用时使用本地关键词相似度降级
-- 左侧知识树的闪光按钮可以重新分析并重组整棵树，重组过程会检测并阻止循环引用
-- 支持多个独立根主题；无法确认上位概念时不会强行归类
-- 支持树视图与知识图谱视图切换，图谱额外展示前置、依赖、实例、比较和关联等横向关系
-- 图谱采用自适应分层布局：同层节点过多时自动换行，画布宽度限制在 640–1400px，并让父节点尽量靠近子节点中心
-- 父子及横向关系使用贝塞尔曲线连接，减少长直线穿过节点造成的视觉干扰
-- 图谱支持滚轮缩放、拖动画布、适应窗口、恢复 100%、节点自动居中和全屏模式
-- 节点可独立折叠/展开子树；局部视图只保留当前节点的祖先、两层后代和直接横向关系
-- 支持按关系类型显示/隐藏连线，并使用滑块过滤低置信度关系
-- 整棵图谱使用单次批量分析，先显示变更预览，确认后才应用，并支持撤销
-- 撤销智能整理后支持重做，避免误操作导致整理结果丢失
-- 自动检测疑似重复知识点，可由用户确认后合并
-- 图谱落盘前会再次校验节点 ID、关系类型和循环依赖，避免异常模型输出破坏数据
-- 图谱页面内置使用指南，解释颜色、实线、虚线、箭头方向和置信度线宽
+当前轻量版本暂不包含 PDF 解析和扫描件 OCR。
 
-### 知识管理
-
-- 支持按标题、正文和标签搜索节点
-- 支持编辑和删除节点，删除父节点时会同时删除其子树并要求确认
-- 支持将完整知识树导出为 JSON，以及从 KnowFlow JSON 备份恢复
-- 支持导出适合笔记软件和文档系统使用的 Markdown
-- 支持手动调整节点的上位知识点，并阻止形成循环引用
-- 节点会显示实际模型来源；后端不可用而降级到本地 Mock 时会明确标注“离线内容”
-- AI 请求支持超时、取消和有限重试；生成期间仍可继续浏览当前节点
-- 手机和平板使用抽屉式知识树、紧凑头部和安全区输入框，桌面端保持固定双栏布局
-
-### 资料导入
-
-- 支持上传 Markdown、TXT，或直接粘贴最长 100,000 字符的学习资料
-- AI 自动提取知识点、层级和横向关系；模型不可用时按标题和段落生成基础结构
-- 每个导入节点保存资料名称和原文引用片段，可在详情页展开查看
-- 单次最多提取 60 个知识点和 180 条横向关系，输出经过索引、类型和长度校验
-- PDF 与扫描件 OCR 暂未包含在当前轻量版本中
-
-### 全局操作历史
-
-- 编辑、删除、移动、合并、资料导入、JSON 导入、清空和智能整理均可撤销与重做
-- 最多保留最近 30 次操作，并可在左侧历史面板查看操作名称和时间
-- 支持 `Ctrl+Z` 撤销、`Ctrl+Shift+Z` 重做；编辑输入框时保留浏览器原生文本撤销行为
-
-### AI 回答体验
-
-- 支持“一句话、入门、专业、论文级”四种回答深度
-- 等待模型和逐段呈现期间均可点击停止，避免无效请求持续占用界面
-- 问答节点支持绕过缓存重新生成，并保留原始问题和回答深度
-- 节点展示模型来源、请求耗时和 Token 估算
-- 相同问题、上下文和回答深度在 10 分钟内使用前端内存缓存，并明确标记缓存命中
-- 回答内容采用逐段呈现，生成期间仍可查看已有节点和图谱
-- 当前请求执行时仍可输入新问题并加入队列；按钮显示排队数量，任务会按顺序自动执行
-
-### 测试
-
-```bash
-npm test
-```
-
-当前自动化测试覆盖知识树循环检测和父节点关系清洗；生产构建仍可使用 `npm run build` 验证。
-- Markdown 使用受控 React 节点渲染，不直接注入模型生成的 HTML
-
-- **智能问答**：输入问题即可获得 AI 生成的详细解答，关键词以橙色高亮显示
-- **点击探索**：回答中的关键词可点击，一键深入了解相关概念，自动创建知识树节点
-- **知识树导航**：左侧树形导航展示知识层级结构，支持无限层级嵌套和展开/折叠
-- **详情面板**：右侧面板展示选中节点的完整内容，支持 Markdown 渲染
-- **迷你讲解窗口**：弹出式词语解释，包含定义、示例和相关术语
-- **多模型支持**：支持 OpenAI、DeepSeek、智谱AI、阿里云通义千问等多种 AI 提供商
-- **数据持久化**：知识树状态自动保存到 localStorage，刷新页面不丢失
-
-## 🛠️ 技术栈
+## 技术栈
 
 ### 前端
-- React 18 + TypeScript
-- Vite 5
-- TailwindCSS 3
-- Zustand（状态管理，含 localStorage 持久化）
-- Lucide React（图标库）
-- Axios（HTTP 请求）
-- Marked（Markdown 渲染）
+
+- React 18、TypeScript、Vite 6
+- Tailwind CSS、Zustand、Lucide React
+- Axios、Marked
 
 ### 后端
-- Express + TypeScript
-- tsx（开发时运行）
-- dotenv（环境变量）
-- cors（跨域支持）
 
-## 🚀 快速开始
+- Express、TypeScript、tsx、dotenv、cors
+- OpenAI SDK，用于对接多个 AI 提供商
 
-### 前置要求
-- Node.js >= 18
-- npm >= 9
+## 快速开始
+
+### 环境要求
+
+- Node.js 18 或更高版本
+- npm 9 或更高版本
 
 ### 安装依赖
 
-```bash
-# 安装前端依赖
-npm install
+在项目根目录执行：
 
-# 安装后端依赖
+```bash
+npm install
 cd api
 npm install
 cd ..
 ```
 
-### 开发模式
-
-**方式一：仅前端（DEMO模式，使用 mock 数据）**
+### 仅启动前端（Demo 模式）
 
 ```bash
 npm run dev
 ```
 
-访问 http://localhost:5173
+访问 <http://localhost:5173>。
 
-**方式二：前端 + 后端（使用真实 AI 模型）**
+### 启动前后端
 
-启动后端服务：
+先启动后端：
+
 ```bash
 npm run server
 ```
 
-启动前端：
+后端默认运行在 <http://localhost:3001>。另开一个终端启动前端：
+
 ```bash
 npm run dev
 ```
 
-### 配置 AI 模型
+Vite 已配置 `/api` 代理，前端会将请求转发到 `http://localhost:3001`。
 
-在 `api` 目录下创建 `.env` 文件：
+## AI 配置
+
+复制环境变量模板并填写 API Key：
 
 ```bash
 cd api
 cp .env.example .env
 ```
 
-编辑 `.env` 文件，配置 AI 提供商和 API Key：
+Windows PowerShell 也可以使用：
+
+```powershell
+Copy-Item .env.example .env
+```
+
+`.env` 支持以下配置：
 
 ```env
 AI_PROVIDER=openai
+CORS_ORIGINS=http://localhost:5173
 
 OPENAI_API_KEY=your_openai_api_key_here
 OPENAI_MODEL=gpt-4o
+DEEPSEEK_API_KEY=your_deepseek_api_key_here
+DEEPSEEK_MODEL=deepseek-chat
+ZHIPU_API_KEY=your_zhipu_api_key_here
+ZHIPU_MODEL=glm-4
+DASHSCOPE_API_KEY=your_dashscope_api_key_here
+DASHSCOPE_MODEL=qwen2-7b-chat
 ```
 
-支持的 AI 提供商及配置项：
+支持 OpenAI、DeepSeek、智谱 AI 和阿里云 DashScope。后端会根据已配置的 Key 选择可用提供商；未配置任何 Key 时，前端使用 Demo 数据。
 
-| 提供商 | 环境变量 | 默认模型 |
-|--------|----------|----------|
-| OpenAI | `AI_PROVIDER=openai` | `gpt-4o` |
-| DeepSeek | `AI_PROVIDER=deepseek` | `deepseek-chat` |
-| 智谱AI | `AI_PROVIDER=zhipu` | `glm-4` |
-| 阿里云通义千问 | `AI_PROVIDER=dashscope` | `qwen2-7b-chat` |
-
-> **注意**：如果未配置任何 API Key，系统会自动进入 DEMO 模式，使用预设的 mock 数据。
-
-### 构建
+## 常用命令
 
 ```bash
-# 前端构建
-npm run build
+npm run dev       # 启动前端开发服务器
+npm run server    # 启动后端服务器
+npm run build     # 类型检查并构建前端
+npm run preview   # 预览前端构建产物
+npm test          # 运行图结构测试
+```
 
-# 后端构建
+后端单独构建：
+
+```bash
 cd api
 npm run build
 ```
 
-## 📁 项目结构
+## API
 
-```
+后端基础地址为 `http://localhost:3001/api`。
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| GET | `/health` | 健康检查 |
+| POST | `/chat` | 获取 AI 问答 |
+| POST | `/explain` | 获取词语解释 |
+| POST | `/knowledge/organize` | 智能整理知识树 |
+| POST | `/knowledge/analyze-graph` | 分析知识图谱 |
+| POST | `/knowledge/import-material` | 从材料导入知识树 |
+
+后端默认启用 CORS、JSON 请求体大小限制（1 MB）和每个 IP 每分钟 60 次请求的限流。
+
+## 项目结构
+
+```text
 .
-├── api/                    # 后端服务
-│   ├── src/
-│   │   ├── controllers/    # 控制器
-│   │   │   └── llmController.ts
-│   │   ├── routes/         # 路由
-│   │   │   └── index.ts
-│   │   ├── services/       # 业务逻辑（LLM服务）
-│   │   │   └── llmService.ts
-│   │   ├── types/          # 类型定义
-│   │   │   └── index.ts
-│   │   └── server.ts       # 服务器入口
-│   ├── .env                # 环境变量
-│   ├── .env.example        # 环境变量模板
-│   ├── package.json        # 后端依赖
-│   └── tsconfig.json       # TypeScript 配置
-├── src/                    # 前端代码
-│   ├── components/         # UI 组件
-│   │   ├── ChatInput.tsx   # 聊天输入框
-│   │   ├── ChatResponse.tsx # AI回答展示
-│   │   ├── DetailPanel.tsx # 详情面板
-│   │   ├── MiniExplanation.tsx # 迷你讲解窗口
-│   │   ├── TreeNavigator.tsx # 知识树导航
-│   │   ├── UserMessage.tsx # 用户消息组件
-│   │   └── WordButton.tsx  # 可点击词语按钮
+├── api/                 # Express 后端与 LLM 服务
+│   └── src/
+│       ├── controllers/
+│       ├── routes/
+│       ├── services/
+│       └── server.ts
+├── src/                 # React 前端
+│   ├── components/
 │   ├── hooks/
-│   │   └── useChat.ts      # 聊天逻辑 Hook
 │   ├── store/
-│   │   └── chatStore.ts    # Zustand 状态管理（三个 store）
 │   ├── types/
-│   │   └── index.ts        # TypeScript 类型定义
-│   ├── utils/
-│   │   └── apiClient.ts    # API 客户端（含 mock 数据）
-│   ├── App.tsx             # 主应用组件
-│   ├── main.tsx            # 应用入口
-│   └── index.css           # 全局样式
-├── index.html              # HTML 模板
-├── package.json            # 前端依赖
-├── vite.config.ts          # Vite 配置
-├── tailwind.config.js      # TailwindCSS 配置
-└── tsconfig.json           # TypeScript 配置
+│   └── utils/
+├── tests/               # Node 原生测试
+├── vite.config.ts
+└── package.json
 ```
 
-## 📖 使用说明
+## 测试与构建
 
-1. **输入问题**：在底部输入框中输入您想了解的问题，按回车键或点击发送按钮
-2. **查看回答**：AI 会生成详细的解答，关键词会以橙色高亮显示
-3. **深入探索**：点击橙色关键词，会在知识树中创建新的解释节点，并在详情面板中显示
-4. **导航知识树**：点击左侧导航树的节点可以切换查看不同层级的内容
-5. **展开/折叠**：点击节点前的箭头可以展开或折叠子节点
-6. **迷你讲解**：点击词语旁的问号图标，弹出迷你窗口查看词语解释
+当前测试覆盖循环引用检测、父节点关系清洗和宽层级图谱布局。提交前建议运行：
 
-## 🎨 设计特色
-
-- **主色调**：温暖的橙色 (#FF6B35) 搭配深蓝色 (#1E3A5F)
-- **布局**：双栏布局，左侧知识树导航，右侧内容详情
-- **响应式**：桌面端优先设计
-
-## 📝 状态管理
-
-项目使用 Zustand 进行状态管理，包含三个 store：
-
-1. **`useTreeStore`**：知识树状态，通过 `persist` middleware 持久化到 localStorage（存储键名：`foolproof-tutorial-tree`）
-2. **`useChatStore`**：聊天消息状态
-3. **`useMiniWindowStore`**：迷你讲解窗口状态
-
-## 🔌 API 端点
-
-### POST /api/chat
-
-获取 AI 回答
-
-**请求体**：
-```json
-{
-  "message": "用户问题",
-  "sessionId": "可选的会话ID",
-  "context": "可选的上下文信息"
-}
+```bash
+npm test
+npm run build
 ```
 
-**响应体**：
-```json
-{
-  "content": "AI回答内容",
-  "words": [
-    { "word": "关键词", "start": 0, "end": 4 }
-  ],
-  "sessionId": "会话ID",
-  "provider": "AI提供商名称"
-}
-```
-
-### POST /api/explain
-
-获取词语解释
-
-**请求体**：
-```json
-{
-  "word": "要解释的词语",
-  "context": "可选的上下文信息"
-}
-```
-
-**响应体**：
-```json
-{
-  "word": "词语",
-  "definition": "词语定义",
-  "content": "解释内容",
-  "words": [],
-  "examples": ["示例1", "示例2"],
-  "relatedTerms": ["相关术语1", "相关术语2"],
-  "provider": "AI提供商名称"
-}
-```
-
-## ⚠️ 注意事项
-
-- 如果未配置 API Key，系统会自动进入 DEMO 模式，使用预设的 mock 数据
-- 后端服务默认运行在 http://localhost:3001
-- 前端默认运行在 http://localhost:5173
-- 知识树数据会自动保存到浏览器 localStorage，清除浏览器数据会导致知识树丢失
-
-## 📄 许可证
+## 许可证
 
 MIT License
